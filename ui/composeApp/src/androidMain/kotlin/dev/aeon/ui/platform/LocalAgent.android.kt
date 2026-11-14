@@ -82,14 +82,22 @@ private object AndroidLocalAgent : LocalAgentHost {
                 val cfg = File(root(), "cfg").apply { mkdirs() }
                 val ws = File(root(), "workspace").apply { mkdirs() }
                 val tmp = context().cacheDir.absolutePath
-                Thread({ NodeHost.start(arrayOf("node", File(project, "node/mobile-main.js").absolutePath, cfg.absolutePath, ws.absolutePath, "7421"), tmp) }, "aeon-node").start()
+                // Node needs far more stack than a default Java thread (1 MB): V8 assumes about 1 MB for itself, and the
+                // first pairing request (crypto, sqlite) overflows a default thread and kills the whole app. 8 MB is safe.
+                Thread(null, {
+                    try {
+                        NodeHost.start(arrayOf("node", File(project, "node/mobile-main.js").absolutePath, cfg.absolutePath, ws.absolutePath, "7421"), tmp)
+                    } catch (t: Throwable) {
+                        android.util.Log.e("AeonNode", "node stopped", t)
+                    }
+                }, "aeon-node", 8L * 1024 * 1024).start()
             }
             repeat(100) {
                 if (answers()) return@withContext null
                 delay(300)
             }
             "에이전트가 시작되지 않았어요. 앱을 다시 열어 보세요."
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             "에이전트를 시작하지 못했어요: ${e.message}"
         }
     }
