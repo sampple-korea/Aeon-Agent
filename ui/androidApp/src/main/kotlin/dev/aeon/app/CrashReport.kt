@@ -43,9 +43,23 @@ object CrashReport {
     private const val FILE = "crash.log"
     private const val PREFS = "crash-report"
     private const val SEEN = "seen"
+    private const val MARKER = "foreground.marker"
+
+    /** True when the previous run ended while the app was on screen (read once, when the process starts). */
+    private var previousRunDied = false
+
+    /** The marker exists only while the app is on screen: it is written on start and removed on stop. */
+    fun setForeground(context: Context, on: Boolean) {
+        val f = File(context.filesDir, MARKER)
+        runCatching { if (on) f.writeText(System.currentTimeMillis().toString()) else f.delete() }
+    }
 
     /** Saves any uncaught Java error to a file before the process ends, then lets the system carry on as usual. */
     fun install(context: Context) {
+        File(context.filesDir, MARKER).let {
+            previousRunDied = it.exists()
+            it.delete()
+        }
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching {
@@ -67,13 +81,12 @@ object CrashReport {
         ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "INITIALIZATION_FAILURE"
         ApplicationExitInfo.REASON_LOW_MEMORY -> "LOW_MEMORY"
         ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "EXCESSIVE_RESOURCE_USAGE"
+        ApplicationExitInfo.REASON_EXIT_SELF -> "EXIT_SELF (앱 안에서 exit() 호출)"
         else -> "OTHER($r)"
     }
 
-    private val reported = setOf(
-        ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE, ApplicationExitInfo.REASON_ANR,
-        ApplicationExitInfo.REASON_SIGNALED, ApplicationExitInfo.REASON_INITIALIZATION_FAILURE, ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
-    )
+    /** Only an exit the owner asked for is left out; the process calling exit() itself (Node does) must show up too. */
+    private val notReported = setOf(ApplicationExitInfo.REASON_USER_REQUESTED, ApplicationExitInfo.REASON_USER_STOPPED, ApplicationExitInfo.REASON_PERMISSION_CHANGE)
 
     /** The text to show, or null when the last run ended normally. Each exit is reported once. */
     fun collect(context: Context): String? {
@@ -88,13 +101,14 @@ object CrashReport {
             val seen = prefs.getLong(SEEN, 0)
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 5).filter { it.timestamp > seen }
-            exits.filter { it.reason in reported }.forEach {
+            exits.filter { it.reason !in notReported }.forEach {
                 parts += "[종료 이유] ${stamp(it.timestamp)} ${reasonName(it.reason)} status=${it.status}" +
                     (if (it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE || it.reason == ApplicationExitInfo.REASON_SIGNALED) " (신호 번호: 11=SEGV 메모리 오류, 6=ABRT 강제 종료, 9=KILL)" else "") +
                     "\n${it.description.orEmpty()}"
             }
             exits.maxOfOrNull { it.timestamp }?.let { prefs.edit().putLong(SEEN, it).apply() }
         }
+        if (previousRunDied) parts += "[감지] 앱이 화면에 떠 있는 동안 종료됐어요."
         if (parts.isEmpty()) return null
         parts += "[앱 로그]\n" + recentLog()
         return "Aeon ${runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()} " +
@@ -103,7 +117,7 @@ object CrashReport {
 
     /** The app's own log lines (an app may read its own): Node's output, Java errors and native crash notes. */
     private fun recentLog(): String = runCatching {
-        val p = ProcessBuilder("logcat", "-d", "-t", "400", "-v", "time", "AeonNode:V", "AndroidRuntime:E", "libc:F", "DEBUG:V", "*:S").redirectErrorStream(true).start()
+        val p = ProcessBuilder("logcat", "-d", "-t", "400", "-v", "time", "AeonNode:V", "*:W").redirectErrorStream(true).start()
         val text = p.inputStream.bufferedReader().readText()
         p.waitFor(3, TimeUnit.SECONDS)
         text.lines().takeLast(250).joinToString("\n").ifBlank { "(로그 없음)" }

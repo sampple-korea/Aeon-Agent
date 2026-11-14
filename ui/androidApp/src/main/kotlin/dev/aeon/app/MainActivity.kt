@@ -50,8 +50,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge() // the app draws its own background under the status and navigation bars
         val model = (application as AeonApplication).model
         lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) = model.start()
-            override fun onStop(owner: LifecycleOwner) = model.stop()
+            override fun onStart(owner: LifecycleOwner) { CrashReport.setForeground(this@MainActivity, true); model.start() }
+            override fun onStop(owner: LifecycleOwner) { model.stop(); CrashReport.setForeground(this@MainActivity, false) }
         })
         openFrom(intent)
         setContent {
