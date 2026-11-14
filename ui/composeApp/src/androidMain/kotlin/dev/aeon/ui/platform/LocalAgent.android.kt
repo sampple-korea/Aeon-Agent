@@ -78,7 +78,9 @@ private object AndroidLocalAgent : LocalAgentHost {
         if (!available) return@withContext "이 앱에는 기기에서 실행하는 기능이 들어 있지 않아요."
         try {
             if (!answers() && started.compareAndSet(false, true)) {
+                android.util.Log.i("AeonNode", "unpacking the server")
                 val project = unpack()
+                android.util.Log.i("AeonNode", "starting node")
                 val cfg = File(root(), "cfg").apply { mkdirs() }
                 val ws = File(root(), "workspace").apply { mkdirs() }
                 val tmp = context().cacheDir.absolutePath

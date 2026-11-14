@@ -26,6 +26,7 @@ class AeonApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashReport.install(this)
         AppContext.init(this)
         val crypto = createDeviceCrypto()
         model = AppModel(
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
         openFrom(intent)
         setContent {
             AppRoot(model) { s, m -> PhoneLayout(s, m) }
+            CrashReport.Dialog()
         }
     }
 
