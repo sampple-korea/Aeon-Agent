@@ -54,6 +54,11 @@ object CrashReport {
         runCatching { if (on) f.writeText(System.currentTimeMillis().toString()) else f.delete() }
     }
 
+    fun isMainProcess(context: Context): Boolean {
+        val name = if (Build.VERSION.SDK_INT >= 28) android.app.Application.getProcessName() else runCatching { File("/proc/self/cmdline").readText().trim('\u0000') }.getOrDefault("")
+        return name == context.packageName
+    }
+
     /** Saves any uncaught Java error to a file before the process ends, then lets the system carry on as usual. */
     fun install(context: Context) {
         File(context.filesDir, MARKER).let {
@@ -102,7 +107,7 @@ object CrashReport {
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 5).filter { it.timestamp > seen }
             exits.filter { it.reason !in notReported }.forEach {
-                parts += "[종료 이유] ${stamp(it.timestamp)} ${reasonName(it.reason)} status=${it.status}" +
+                parts += "[종료 이유] ${stamp(it.timestamp)} ${it.processName} ${reasonName(it.reason)} status=${it.status}" +
                     (if (it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE || it.reason == ApplicationExitInfo.REASON_SIGNALED) " (신호 번호: 11=SEGV 메모리 오류, 6=ABRT 강제 종료, 9=KILL)" else "") +
                     "\n${it.description.orEmpty()}"
             }

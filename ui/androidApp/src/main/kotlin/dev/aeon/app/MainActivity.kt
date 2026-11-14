@@ -26,8 +26,10 @@ class AeonApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        CrashReport.install(this)
         AppContext.init(this)
+        // The agent's own process (":node") starts this class too; it needs none of the app's state.
+        if (!CrashReport.isMainProcess(this)) return
+        CrashReport.install(this)
         val crypto = createDeviceCrypto()
         model = AppModel(
             AeonClient("http://invalid.local", crypto, HttpClient()), // replaced when the user pairs or a saved pairing is restored

@@ -4,7 +4,6 @@ import android.content.Context
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -13,7 +12,7 @@ import kotlinx.coroutines.withContext
  * Node.js for Mobile in this process. The native library `aeonnode` (see androidApp/src/main/jni) starts Node on the
  * server that ships as an asset. It can be started once per process and then runs until the process ends.
  */
-internal object NodeHost {
+object NodeHost {
     val loaded: Boolean by lazy {
         try {
             System.loadLibrary("aeonnode")
@@ -28,7 +27,6 @@ internal object NodeHost {
 }
 
 private object AndroidLocalAgent : LocalAgentHost {
-    private val started = AtomicBoolean(false)
     private const val ASSET_DIR = "nodejs-project"
 
     private fun context(): Context = AppContext.app
@@ -77,22 +75,19 @@ private object AndroidLocalAgent : LocalAgentHost {
     override suspend fun start(): String? = withContext(Dispatchers.IO) {
         if (!available) return@withContext "이 앱에는 기기에서 실행하는 기능이 들어 있지 않아요."
         try {
-            if (!answers() && started.compareAndSet(false, true)) {
+            if (!answers()) {
                 android.util.Log.i("AeonNode", "unpacking the server")
                 val project = unpack()
                 android.util.Log.i("AeonNode", "starting node")
                 val cfg = File(root(), "cfg").apply { mkdirs() }
                 val ws = File(root(), "workspace").apply { mkdirs() }
                 val tmp = context().cacheDir.absolutePath
-                // Node needs far more stack than a default Java thread (1 MB): V8 assumes about 1 MB for itself, and the
-                // first pairing request (crypto, sqlite) overflows a default thread and kills the whole app. 8 MB is safe.
-                Thread(null, {
-                    try {
-                        NodeHost.start(arrayOf("node", File(project, "node/mobile-main.js").absolutePath, cfg.absolutePath, ws.absolutePath, "7421"), tmp)
-                    } catch (t: Throwable) {
-                        android.util.Log.e("AeonNode", "node stopped", t)
-                    }
-                }, "aeon-node", 8L * 1024 * 1024).start()
+                // Node runs in its own process (":node"): when it exits or crashes, only that process goes, not the app.
+                context().startService(
+                    android.content.Intent().setClassName(context().packageName, "dev.aeon.app.NodeService")
+                        .putExtra("args", arrayOf("node", File(project, "node/mobile-main.js").absolutePath, cfg.absolutePath, ws.absolutePath, "7421"))
+                        .putExtra("tmp", tmp),
+                )
             }
             repeat(100) {
                 if (answers()) return@withContext null
