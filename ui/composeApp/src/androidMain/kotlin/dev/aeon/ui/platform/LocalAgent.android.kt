@@ -90,14 +90,20 @@ private object AndroidLocalAgent : LocalAgentHost {
         am.runningAppProcesses?.firstOrNull { it.processName == "${context().packageName}:node" }
     }.getOrNull()
 
-    /** What Node printed (and the native bridge logged) since the last call, one clean line each. */
-    private fun nodeOutput(pid: Int, already: MutableSet<String>): List<String> = runCatching {
-        val p = ProcessBuilder("logcat", "-d", "-v", "brief", "--pid=$pid", "AeonNode:V", "*:S").redirectErrorStream(true).start()
+    /**
+     * What Node printed (and the native bridge and the service logged) since [token] was written to the log, one clean line
+     * each, only those not returned by an earlier call ([emitted] counts them). It does not depend on knowing the process,
+     * which may already be gone.
+     */
+    private fun nodeOutput(token: String, emitted: IntArray): List<String> = runCatching {
+        val p = ProcessBuilder("logcat", "-d", "-v", "brief", "AeonNode:V", "*:S").redirectErrorStream(true).start()
         val lines = p.inputStream.bufferedReader().readLines()
         p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-        lines.filter { it.isNotBlank() && !it.startsWith("---") }
+        val mine = lines.drop(lines.indexOfLast { it.contains(token) } + 1).filter { it.isNotBlank() && !it.startsWith("---") }
             .map { it.replace(Regex("^[A-Z]/AeonNode\\(\\s*\\d+\\):\\s?"), "node: ") }
-            .filter { already.add(it) }
+        val fresh = mine.drop(emitted[0])
+        emitted[0] = mine.size
+        fresh
     }.getOrDefault(emptyList())
 
     private fun errorLog(): List<String> =
@@ -120,6 +126,8 @@ private object AndroidLocalAgent : LocalAgentHost {
                 return@withContext null
             }
             val began = System.currentTimeMillis()
+            val token = "begin-${System.nanoTime()}"
+            android.util.Log.i("AeonNode", token)
             say(0, "에이전트 파일을 확인해요")
             val project = unpack(::say)
             val cfg = File(root(), "cfg").apply { mkdirs() }
@@ -134,28 +142,26 @@ private object AndroidLocalAgent : LocalAgentHost {
                     .putExtra("tmp", tmp),
             )
             say(2, "응답을 기다려요 (최대 30초)")
-            val seen = mutableSetOf<String>()
-            var pid = 0
+            val emitted = IntArray(1)
             var reportedAlive = false
             repeat(100) { i ->
                 if (answers()) {
-                    nodeProcess()?.pid?.let { p -> nodeOutput(p, seen).forEach { l -> say(2, l) } }
+                    nodeOutput(token, emitted).forEach { l -> say(2, l) }
                     say(2, "에이전트가 응답했어요")
                     return@withContext null
                 }
-                if (i % 4 == 3) {
+                if (i % 3 == 2) {
+                    val lines = nodeOutput(token, emitted)
+                    lines.forEach { l -> say(2, l) }
                     val proc = nodeProcess()
-                    if (proc != null) {
-                        pid = proc.pid
-                        if (!reportedAlive) { reportedAlive = true; say(2, "에이전트 프로세스가 켜졌어요 (pid $pid)") }
-                    }
-                    if (pid != 0) nodeOutput(pid, seen).forEach { l -> say(2, l) }
-                    val died = (reportedAlive && proc == null) || (!reportedAlive && i >= 20)
-                    if (died) {
+                    if (proc != null && !reportedAlive) { reportedAlive = true; say(2, "에이전트 프로세스가 켜졌어요 (pid ${proc.pid})") }
+                    // Node returned (the service logs it first), or the process is gone, or it never showed up.
+                    val ended = lines.any { it.contains("node returned") || it.contains("node stopped") }
+                    val gone = (reportedAlive && proc == null) || (!reportedAlive && i >= 20)
+                    if (ended || gone) {
                         errorLog().forEach { l -> say(2, "node-error.log: $l") }
                         exitReason(began)?.let { say(2, it) }
-                        return@withContext if (reportedAlive) "에이전트 프로세스가 중간에 멈췄어요. 아래 로그를 복사해서 알려 주세요."
-                        else "에이전트 프로세스가 켜지지 않았어요. 아래 로그를 복사해서 알려 주세요."
+                        return@withContext "에이전트가 시작하자마자 멈췄어요. 아래 로그를 복사해서 알려 주세요."
                     }
                 }
                 delay(300)
