@@ -108,6 +108,7 @@ object CrashReport {
             }
             exits.maxOfOrNull { it.timestamp }?.let { prefs.edit().putLong(SEEN, it).apply() }
         }
+        runCatching { File(context.filesDir, "agent/cfg/node-error.log").takeIf { it.exists() }?.readText()?.takeLast(3000) }.getOrNull()?.let { parts += "[에이전트(Node) 오류 기록]\n$it" }
         if (previousRunDied) parts += "[감지] 앱이 화면에 떠 있는 동안 종료됐어요."
         if (parts.isEmpty()) return null
         parts += "[앱 로그]\n" + recentLog()
@@ -117,7 +118,7 @@ object CrashReport {
 
     /** The app's own log lines (an app may read its own): Node's output, Java errors and native crash notes. */
     private fun recentLog(): String = runCatching {
-        val p = ProcessBuilder("logcat", "-d", "-t", "400", "-v", "time", "AeonNode:V", "*:W").redirectErrorStream(true).start()
+        val p = ProcessBuilder("logcat", "-d", "-t", "1500", "-v", "time", "AeonNode:V", "*:F").redirectErrorStream(true).start()
         val text = p.inputStream.bufferedReader().readText()
         p.waitFor(3, TimeUnit.SECONDS)
         text.lines().takeLast(250).joinToString("\n").ifBlank { "(로그 없음)" }

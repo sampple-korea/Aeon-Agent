@@ -98,7 +98,8 @@ private object AndroidLocalAgent : LocalAgentHost {
                 if (answers()) return@withContext null
                 delay(300)
             }
-            "에이전트가 시작되지 않았어요. 앱을 다시 열어 보세요."
+            val why = runCatching { File(File(root(), "cfg"), "node-error.log").readText().trim().takeLast(1500) }.getOrDefault("")
+            "에이전트가 시작되지 않았어요. 앱을 다시 열어 보세요." + if (why.isNotEmpty()) "\n\n$why" else ""
         } catch (e: Throwable) {
             "에이전트를 시작하지 못했어요: ${e.message}"
         }
