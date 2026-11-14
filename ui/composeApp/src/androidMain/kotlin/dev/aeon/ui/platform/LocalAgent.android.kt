@@ -80,7 +80,7 @@ private object AndroidLocalAgent : LocalAgentHost {
     override var onProgress: ((Int, String) -> Unit)? = null
 
     private fun say(stage: Int, line: String) {
-        android.util.Log.i("AeonNode", line)
+        android.util.Log.i("AeonApp", line) // not "AeonNode": the node lines are read back from that tag and this would repeat
         onProgress?.invoke(stage, line)
     }
 

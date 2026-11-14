@@ -24,6 +24,8 @@ class NodeService : Service() {
             // Node needs far more stack than a default Java thread (1 MB): 8 MB is safe.
             Thread(null, {
                 try {
+                    // The native library is loaded by touching this (it is only loaded on first use, and this process is new).
+                    check(NodeHost.loaded) { "libaeonnode.so could not be loaded" }
                     val code = NodeHost.start(args, tmp)
                     Log.e("AeonNode", "node returned $code")
                 } catch (t: Throwable) {
